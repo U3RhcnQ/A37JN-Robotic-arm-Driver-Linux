@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0.0 FATAL_ERROR)
 
-project(driver VERSION 0.1.0 LANGUAGES C)
+project("Linux Kernel Module with CLion IDE support / CMake" VERSION 0.1.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -21,3 +21,17 @@ add_custom_command(OUTPUT ${DRIVER_FILE}
         DEPENDS hello.c VERBATIM)
 
 add_custom_target(driver ALL DEPENDS ${DRIVER_FILE})
+
+
+# CLion IDE support
+
+# find MODULE_LICENSE("GPL"), MODULE_AUTHOR() etc.
+add_definitions(-D__KERNEL__ -DMODULE)
+
+# this is needed in order for CLion IDE to provide syntax highlightning
+# this is independent from the actual kernel object that is built
+add_executable(dummy
+        hello.c
+        # add all *.h and *.c files here that
+        # CLion should cover
+)

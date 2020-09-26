@@ -8,7 +8,7 @@ execute_process(
 # Find the headers
 find_path(KERNELHEADERS_DIR
         include/linux/user.h
-        PATHS /usr/src/kernels/${KERNEL_RELEASE}
+        PATHS /usr/src/linux-headers-${KERNEL_RELEASE}
         )
 
 message(STATUS "Kernel release: ${KERNEL_RELEASE}")

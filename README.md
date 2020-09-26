@@ -1,6 +1,8 @@
 A simple hello world kernel module, that can be build with cmake.
 Utilize Kbuild through cmake, and do it in a build directory.
 
+Works with Clion IDE (highlightning, errors, auto-suggestions).
+
 
 Usage:
 1) clone it.
