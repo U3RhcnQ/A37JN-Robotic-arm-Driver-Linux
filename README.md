@@ -6,6 +6,8 @@ in-tree-development and out-of-tree development (I tested and used both).
 
 Clion doesn't build the kernel module itself, it just supports you while coding.
 You have to execute `$ make` on the command line by yourself to build your `.ko`-file!
+I personally think that's the better and simpler approach. For another approach
+check the original project (link below)!
 
 ## Special thanks
 Special thanks to the original project: https://gitlab.com/christophacham/cmake-kernel-module

@@ -10,6 +10,7 @@ find_package(KernelHeaders REQUIRED)
 
 
 # find MODULE_LICENSE("GPL"), MODULE_AUTHOR() etc.
+# thanks to "merseyviking" from stack overflow
 add_definitions(-D__KERNEL__ -DMODULE)
 
 # this is needed in order for CLion IDE to provide syntax highlightning
