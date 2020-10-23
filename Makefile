@@ -5,9 +5,11 @@
 obj-m += hello.o
 
 # we have no file "hello.c" in this example
-# therefore we specify: module hello.ko relies online
-# main.c and greet.c ... it's all this makefile module magic
-# see online ressources for more information
+# therefore we specify: module hello.ko relies on
+# main.c and greet.c ... it's this makefile module magic thing..
+# see online resources for more information
+# YOU DON'T need this IF you have *.c-file with the name of the
+# final kernel module :)
 hello-y := \
 	main.o \
 	greet.o \
