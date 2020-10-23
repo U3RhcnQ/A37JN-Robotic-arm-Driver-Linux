@@ -1,45 +1,35 @@
-A simple hello world kernel module, that can be build with cmake.
-Utilize Kbuild through cmake, and do it in a build directory.
+# Build kernel modules with Clion IDE support
 
-Works with Clion IDE (highlightning, errors, auto-suggestions).
+This setup allows Clion IDE to support you with syntax highlightning and
+other convenient IDE stuff while developing kernel modules. This works for 
+in-tree-development and out-of-tree development (I tested and used both).
 
+Clion doesn't build the kernel module itself, it just supports you while coding.
+You have to execute `$ make` on the command line by yourself to build your `.ko`-file!
 
-Usage:
-1) clone it.
-2) create a folder: mkdir build
-3) navigate into build: cd build
-4) run cmake: cmake ../
-5) build it: make
+## Special thanks
+Special thanks to the original project: https://gitlab.com/christophacham/cmake-kernel-module
+I made some changes to it to fit my needs. And hopefully yours too.
 
+## Attention
+- always make sure latest kernel headers are installed `$ sudo apt install kernel-headers-$(uname -r)`
+- always synchronize Makefile and CmakeLists.txt (if you add or delete source files)
+- check the Clion Cmake log if errors occur. Especially the lines "kernel release"
+  and "kernel headers"
+- depending on your system you need to change the path where kernel headers
+  are stored: `cmake/FindKernelHeaders.cmake # Line 11`
 
+## Build, Load, and unload
+- `$ make`
+- `$ sudo insmod hello.ko`
+- `$ sudo dmesg` (check if print messages worked)
+- `$ sudo rmmod hello`
+ 
 
-Expected behavior: 
-
-cmake ../ shall do:
-```
-$ cmake ../
--- The C compiler identification is GNU 9.2.1
--- Check for working C compiler: /usr/lib64/ccache/cc
--- Check for working C compiler: /usr/lib64/ccache/cc -- works
--- Detecting C compiler ABI info
--- Detecting C compiler ABI info - done
--- Detecting C compile features
--- Detecting C compile features - done
--- Kernel release: 5.3.13-300.fc31.x86_64
--- Kernel headers: /usr/src/kernels/5.3.13-300.fc31.x86_64
--- Configuring done
--- Generating done
--- Build files have been written to: /home/ca/Code/cmake-kernel-module/build
-```
-make shall do:
-```
-make
-Scanning dependencies of target driver
-[100%] Generating hello.ko
-[100%] Built target driver
-```
-
-Among others the hello.ko is now present. 
-
-
-Thoughts and comments are welcome. 
+## Trivia
+I successfully used this Cmake project setup to make changes to existing 
+linux drivers. Just clone the linux source, open a specific folder, add
+`CMakeLists.txt` and `cmake/`-dir - happy hacking! But be aware of that
+you probably don't want to commit cmake-related stuff - at least for the 
+release-ready version - Unless you want Linus Torvalds and other kernel
+maintainers to beat you.. or so :D

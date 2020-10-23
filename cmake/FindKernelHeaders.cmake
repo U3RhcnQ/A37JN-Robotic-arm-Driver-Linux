@@ -1,3 +1,6 @@
+# BIG THANK YOU TO THE ORIGINAL AUTHOR
+# https://gitlab.com/christophacham/cmake-kernel-module
+
 # Find the kernel release
 execute_process(
         COMMAND uname -r
