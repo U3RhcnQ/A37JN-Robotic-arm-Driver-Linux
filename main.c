@@ -2,6 +2,7 @@
 #include <linux/kernel.h>     /* Needed for KERN_INFO */
 #include <linux/init.h>       /* Needed for the macros */
 
+// we have a custom function in this file :)
 #include "greet.h"
 
 ///< The license type -- this affects runtime behavior 
@@ -16,22 +17,18 @@ MODULE_DESCRIPTION("A simple Hello world LKM!");
 ///< The version of the module 
 MODULE_VERSION("0.1");
 
-static int __init
-
-hello_start(void)
+static int __init hello_start(void)
 {
     printk(KERN_INFO "Loading hello module...\n");
     printk(KERN_INFO "Hello world\n");
 
-    // call function from other fiel
+    // call function from other file
     greet();
 
     return 0;
 }
 
-static void __exit
-
-hello_end(void)
+static void __exit hello_end(void)
 {
     printk(KERN_INFO "Goodbye Mr.\n");
 }
