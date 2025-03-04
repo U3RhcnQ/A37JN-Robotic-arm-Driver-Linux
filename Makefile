@@ -1,21 +1,17 @@
 # this is a make file for a kernel object
 # see online for more information
 
-# will build "hello.ko"
-obj-m += hello.o
+# will build "main.ko"
+obj-m += main.o
 
-# we have no file "hello.c" in this example
-# therefore we specify: module hello.ko relies on
-# main.c and greet.c ... it's this makefile module magic thing..
-# see online resources for more information
-# YOU DON'T need this IF you have *.c-file with the name of the
-# final kernel module :)
-hello-y := \
-	main.o \
-	greet.o \
+# Define the output directory
+OUT_DIR := $(PWD)/out/
 
 all:
-	make -C /lib/modules/$(shell uname -r)/build/ M=$(PWD) modules
+	mkdir -p $(OUT_DIR)
+	make -C /lib/modules/$(shell uname -r)/build/ M=$(PWD)  modules
+	mv .*.*.cmd *.o *.ko *.mod *.mod.c Module.symvers modules.order $(OUT_DIR)/
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	rm -rf $(OUT_DIR)/*

@@ -18,7 +18,6 @@ add_definitions(-D__KERNEL__ -DMODULE)
 add_executable(dummy
         # add all *.h and *.c files here that # CLion should cover
         main.c
-        greet.c
 )
 
 # CLion IDE will find symbols from <linux/*>

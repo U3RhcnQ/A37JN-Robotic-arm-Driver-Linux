@@ -1,0 +1,1 @@
+savedcmd_/home/petr/CLionProjects/cmake-kernel-module/Module.symvers :=  scripts/mod/modpost -M -m -a      -o /home/petr/CLionProjects/cmake-kernel-module/Module.symvers -T /home/petr/CLionProjects/cmake-kernel-module/modules.order -i Module.symvers -e 
