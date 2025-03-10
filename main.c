@@ -48,7 +48,7 @@ static struct usb_driver usb_driver = {
     .disconnect = usb_disconnect
 };
 
-static int send_cmd(unsigned char *ArmCmd) {
+static int send_cmd(unsigned char *ArmCmd[3]) {
 
     if (!active_usb_device) {
         printk(KERN_ERR "No active USB device\n");
@@ -104,12 +104,42 @@ static ssize_t device_read(struct file *filep, char *buffer, size_t len, loff_t 
 
 
     // Print the read data (ensure it's null-terminated for safe printing)
-    char temp_buf[bytes_read + 1];  // Create buffer with space for null terminator
-    memcpy(temp_buf, device_buffer + *offset - bytes_read, bytes_read);
-    temp_buf[bytes_read] = '\0';  // Null-terminate
+    char message[bytes_read + 1];  // Create buffer with space for null terminator
+    memcpy(message, device_buffer + *offset - bytes_read, bytes_read);
+    message[bytes_read] = '\0';  // Null-terminate
 
+    char *param = strchr(message, ':'); // Find the ':'
 
-    printk(KERN_INFO "%s: Read %d bytes String: %s\n", KBUILD_MODNAME, bytes_read, temp_buf);
+    if (param) {
+
+        // move one character forward past :
+        param++;
+
+        // Checking if param is either left or right when the command is not led related
+        if (strncmp(message, "led:", 9) != 0 && strcmp(param, "left") != 0 && strcmp(param, "right") != 0) {
+            printk(KERN_INFO "%s: Invalid command\n", KBUILD_MODNAME);
+            return -EFAULT;
+        } else if (strncmp(message, "led:", 9) == 0 && strcmp(param, "on") != 0 && strcmp(param, "off") != 0) {
+
+        }
+
+    } else {
+        printk(KERN_INFO "%s: Invalid command\n", KBUILD_MODNAME);
+        return -EFAULT;
+    }
+
+    if (strncmp(message, "turnBody:", 9) == 0) {
+        if (strcmp(param, "left") == 0) {
+            printk(KERN_INFO "RobotArm: Turning Body LEFT\n");
+            // Call function to turn left
+        } else if (strcmp(param, "right") == 0) {
+            printk(KERN_INFO "RobotArm: Turning Body RIGHT\n");
+            // Call function to turn right
+        }
+
+    }
+
+    printk(KERN_INFO "%s: Read %d bytes String: %s", KBUILD_MODNAME, bytes_read, message);
     return bytes_read;
 }
 
@@ -124,11 +154,11 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t len, 
     *offset += bytes_write;
 
     // Print the read data (ensure it's null-terminated for safe printing)
-    char temp_buf[bytes_write + 1];  // Create buffer with space for null terminator
-    memcpy(temp_buf, device_buffer + *offset - bytes_write, bytes_write);
-    temp_buf[bytes_write] = '\0';  // Null-terminate
+    char message[bytes_write + 1];  // Create buffer with space for null terminator
+    memcpy(message, device_buffer + *offset - bytes_write, bytes_write);
+    message[bytes_write] = '\0';  // Null-terminate
 
-    printk(KERN_INFO "%s: Wrote %d bytes String: %s\n", KBUILD_MODNAME, bytes_write, temp_buf);
+    printk(KERN_INFO "%s: Wrote %d bytes String: %s", KBUILD_MODNAME, bytes_write, message);
     return bytes_write;
 }
 
