@@ -105,31 +105,39 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t len, 
     const char *param = strchr(message, ':'); // Find the ':'
 
     // If ":" exists
-    if (param) {
-        param++; // move one character forward past :
-
-        // Checking if param is either left or right when the command is not led related
-        if (strncmp(message, "led:", 9) != 0 && strcmp(param, "left") != 0 && strcmp(param, "right") != 0) {
-            printk(KERN_INFO "%s: Invalid command\n", KBUILD_MODNAME);
-            return -EFAULT;
-        } else if (strncmp(message, "led:", 9) == 0 && strcmp(param, "on") != 0 && strcmp(param, "off") != 0) {
-
-        }
-
-    } else {
+    if (!param) {
         printk(KERN_INFO "%s: Invalid command\n", KBUILD_MODNAME);
-        return -EFAULT;
+        return -1;
     }
 
-    if (strncmp(message, "turnBody:", 9) == 0) {
+    const int index = (int) (param - message);
+    param++; // move one character forward past:
+
+
+
+    if (strncmp(message, "base", index) == 0){
+        printk(KERN_INFO "%s: base found", KBUILD_MODNAME);
         if (strcmp(param, "left") == 0) {
-            printk(KERN_INFO "RobotArm: Turning Body LEFT\n");
-            // Call function to turn left
-        } else if (strcmp(param, "right") == 0) {
-            printk(KERN_INFO "RobotArm: Turning Body RIGHT\n");
-            // Call function to turn right
+
+        } else if(strcmp(param, "right") == 0) {
+
         }
 
+    } else if (strncmp(message, "shoulder", index) == 0) {
+        printk(KERN_INFO "%s: shoulder found", KBUILD_MODNAME);
+    } else if (strncmp(message, "elbow", index) == 0) {
+        printk(KERN_INFO "%s: elbow found", KBUILD_MODNAME);
+    } else if (strncmp(message, "wrist", index) == 0) {
+
+    } else if (strncmp(message, "gripper", index) == 0) {
+
+    } else if (strncmp(message, "led", index) == 0) {
+
+    } else if (strncmp(message, "stop", index) == 0) {
+
+    }else {
+        printk(KERN_INFO "%s: Invalid command\n", KBUILD_MODNAME);
+        return -1;
     }
 
     return bytes_write;
