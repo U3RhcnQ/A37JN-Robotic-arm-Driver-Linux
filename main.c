@@ -20,7 +20,11 @@ static int major = 0;
 static int shoulder_status = 0;
 static int elbow_status = 0;
 static int wrist_status = 0;
-static int gripper_status = 0;
+static int claw_status = 0;
+
+static int connection_status = 0;
+static int command_status = 0;
+static int battery_level = 0;
 
 // Command for arm
 static int command[3] = {0, 0, 0};
@@ -42,26 +46,32 @@ static struct usb_device_id usb_ids[] = {
 static struct class *char_class;
 static struct device *char_device;
 
+// Helper to quicly modify the whole command
+static void modify_command(const int a, const int b, const int c) {
+    command[0] = a;
+    command[1] = b;
+    command[2] = c;
+}
+
 static int usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
-    printk(KERN_INFO "USB device found: Vendor: 0x%04x, Product ID: 0x%04x\n", id->idVendor, id->idProduct);
+    printk(KERN_INFO "%s: USB device found: Vendor: 0x%04x, Product ID: 0x%04x\n", KBUILD_MODNAME, id->idVendor, id->idProduct);
     active_usb_device = interface_to_usbdev(interface);
+    connection_status = 1;
     return 0;
 }
 
 static void usb_disconnect(struct usb_interface *interface) {
-    printk(KERN_INFO "USB device removed\n");
+    printk(KERN_INFO "%s: USB device removed\n", KBUILD_MODNAME);
     active_usb_device = NULL;
+    connection_status = 0;
 
     // Since device has been disconnected we can reset all values
-    command[0] = 0;
-    command[1] = 0;
-    command[2] = 0;
+    modify_command(0, 0, 0);
 
     shoulder_status = 0;
     elbow_status = 0;
     wrist_status = 0;
-    gripper_status = 0;
-
+    claw_status = 0;
 }
 
 // Struct for USB has to be bellow functions, or it breaks ?
@@ -72,11 +82,6 @@ static struct usb_driver usb_driver = {
     .disconnect = usb_disconnect
 };
 
-void modify_command(const int a, const int b, const int c) {
-    command[0] = a;
-    command[1] = b;
-    command[2] = c;
-}
 
 // Function to send a command to the robot arm
 static int send_cmd(void) {
@@ -84,6 +89,7 @@ static int send_cmd(void) {
     // Sanity Check that USB device exists
     if (!active_usb_device) {
         printk(KERN_ERR "%s: No active USB device\n", KBUILD_MODNAME);
+        connection_status = 0;
         return -ENODEV;
     }
 
@@ -96,7 +102,7 @@ static int send_cmd(void) {
         parsed_command[i] = (unsigned char)command[i];
     }
 
-    printk("Size: %lu\n", sizeof(parsed_command));
+    //printk("Size: %lu\n", sizeof(parsed_command));
     int ret;
 
     const __u8 bmRequestType = 0x40;
@@ -104,6 +110,7 @@ static int send_cmd(void) {
     const __u16 wValue = 0x100;
     const __u16 wIndex = 0;
 
+    // Send control message to usb
     ret = usb_control_msg(active_usb_device,
         usb_sndctrlpipe(active_usb_device, 0),
         bRequest,
@@ -113,52 +120,78 @@ static int send_cmd(void) {
         1000);
 
     if (ret < 0) {
-        printk(KERN_INFO "%s: usb_control_msg failed: %d\n", KBUILD_MODNAME, ret);
+        printk(KERN_INFO "%s: USB control message failed with code: %d\n", KBUILD_MODNAME, ret);
+        battery_level = 0;
+        connection_status = 0;
     } else {
         printk(KERN_INFO "%s: Sent command to USB device: [%d, %d, %d] Return: %d \n", KBUILD_MODNAME, parsed_command[0], parsed_command[1], parsed_command[2], ret);
+        battery_level = ret;
+        connection_status = 1;
     }
 
     return ret;
-
 }
 
-
-static int device_open(struct inode *inodep, struct file *filep) {
+static int device_open(struct inode *inode_pointer, struct file *file_pointer) {
     printk(KERN_INFO "%s: Device opened\n", KBUILD_MODNAME);
     return 0;
 }
 
-static int device_close(struct inode *inodep, struct file *filep) {
+static int device_close(struct inode *inode_pointer, struct file *file_pointer) {
     printk(KERN_INFO "%s: Device closed\n", KBUILD_MODNAME);
     return 0;
 }
 
-static ssize_t device_read(struct file *filep, char *buffer, size_t len, loff_t *offset) {
-    int bytes_read = BUF_SIZE - *offset;
-    if (bytes_read > len) bytes_read = len;
-    if (bytes_read <= 0) return 0;
+static ssize_t device_read(struct file *file_pointer, char __user *buffer, size_t len, loff_t *offset) {
 
-    if (copy_to_user(buffer, command_buffer + *offset, bytes_read) != 0)
+    char status_message[64];
+    int msg_length;
+
+    const char *connection_status_text;
+    const char *command_status_text;
+
+    if (connection_status == 1) {
+        connection_status_text = "yes";
+    } else {
+        // Assume we are not connected
+        connection_status_text = "no";
+        command_status = 0;
+        battery_level = 0;
+    }
+
+    if (command_status == 1) {
+        command_status_text = "good";
+    } else if (command_status == 2) {
+        command_status_text = "bad";
+    } else {
+        command_status_text = "none";
+    }
+    
+    // Format the message
+    msg_length = snprintf(status_message, sizeof(status_message), "connected:%s status:%s battery:%d\n", connection_status_text, command_status_text, battery_level);
+
+    // Handle the offset (ensures the message is only read once per call)
+    if (*offset >= msg_length) {
+        return 0; // EOF
+    }
+
+    // Copy message to user space
+    if (copy_to_user(buffer, status_message, msg_length)) {
         return -EFAULT;
+    }
 
-    *offset += bytes_read;
-
-    // Print the read data (ensure it's null-terminated for safe printing)
-    char message[bytes_read + 1];  // Create buffer with space for null terminator
-    memcpy(message, command_buffer + *offset - bytes_read, bytes_read);
-    message[bytes_read] = '\0';  // Null-terminate
-
-    printk(KERN_INFO "%s: Read %d bytes String: %s", KBUILD_MODNAME, bytes_read, message);
-    return bytes_read;
+    *offset += msg_length; // Update file offset
+    return msg_length;
 }
 
-void process_command(const char *input) {
+static void process_command(const char *input) {
 
     const char *param = strchr(input, ':'); // Find the ':'
 
     // If ":" exists
     if (!param) {
         printk(KERN_INFO "%s: Invalid input\n", KBUILD_MODNAME);
+        command_status = 2;
         return;
     }
 
@@ -167,6 +200,7 @@ void process_command(const char *input) {
 
     if (strlen(param) < 2) {
         printk(KERN_INFO "%s: Invalid input\n", KBUILD_MODNAME);
+        command_status = 2;
         return;
     }
 
@@ -174,25 +208,32 @@ void process_command(const char *input) {
         if (strcmp(param, "left") == 0) {
             printk(KERN_INFO "%s: Turning base left", KBUILD_MODNAME);
             command[1] = 2;
+            command_status = 1;
         } else if(strcmp(param, "right") == 0) {
             printk(KERN_INFO "%s: Turning base right", KBUILD_MODNAME);
             command[1] = 1;
+            command_status = 1;
         } else if(strcmp(param, "stop") == 0) {
             printk(KERN_INFO "%s: Stopped base", KBUILD_MODNAME);
             command[1] = 0;
+            command_status = 1;
         } else {
             printk(KERN_INFO "%s: Invalid base command\n", KBUILD_MODNAME);
+            command_status = 2;
         }
 
     } else if (strncmp(input, "led", index) == 0) {
         if (strcmp(param, "on") == 0) {
             printk(KERN_INFO "%s: Turning led on", KBUILD_MODNAME);
             command[2] = 1;
+            command_status = 1;
         } else if(strcmp(param, "off") == 0) {
             printk(KERN_INFO "%s: Turning led off", KBUILD_MODNAME);
             command[2] = 0;
+            command_status = 1;
         } else {
             printk(KERN_INFO "%s: Invalid led command\n", KBUILD_MODNAME);
+            command_status = 2;
         }
 
     } else if (strncmp(input, "stop", index) == 0) {
@@ -200,25 +241,113 @@ void process_command(const char *input) {
             printk(KERN_INFO "%s: Stopping movement", KBUILD_MODNAME);
             command[0] = 0;
             command[1] = 0;
+            command_status = 1;
 
             shoulder_status = 0;
             elbow_status = 0;
             wrist_status = 0;
-            gripper_status = 0;
+            claw_status = 0;
 
         } else if(strcmp(param, "all") == 0) {
             printk(KERN_INFO "%s: Stopping all", KBUILD_MODNAME);
-            command[0] = 0;
-            command[1] = 0;
-            command[2] = 0;
+
+            modify_command(0,0,0);
+            command_status = 1;
 
             shoulder_status = 0;
             elbow_status = 0;
             wrist_status = 0;
-            gripper_status = 0;
+            claw_status = 0;
 
         } else {
             printk(KERN_INFO "%s: Invalid stop command\n", KBUILD_MODNAME);
+            command_status = 2;
+        }
+
+    } else if (strncmp(input, "direct", index) == 0) {
+
+        //mostly temp variables
+        char a[4], b[4], c[4];
+        int int_a, int_b, int_c;
+
+        // need this as kstrtol expects a long
+        long temp;
+
+        // Parse three integers separated by commas
+        // will try to match up to 3 character before the ","
+        if (sscanf(param, "%3[^,],%3[^,],%3s", a, b, c) == 3) {
+
+            // Convert and validate numbers
+            if (kstrtol(a, 0, &temp) == 0) {
+                int_a = (int) temp;
+            } else {
+                printk(KERN_INFO "%s: Invalid number: %s\n", KBUILD_MODNAME, a);
+                command_status = 2;
+                return;
+            }
+
+            if (kstrtol(b, 0, &temp) == 0) {
+                int_b = (int) temp;
+            } else {
+                printk(KERN_INFO "%s: Invalid number: %s\n", KBUILD_MODNAME, b);
+                command_status = 2;
+                return;
+            }
+
+            if (kstrtol(c, 0, &temp) == 0) {
+                int_c = (int) temp;
+            } else {
+                printk(KERN_INFO "%s: Invalid number: %s\n", KBUILD_MODNAME, c);
+                command_status = 2;
+                return;
+            }
+
+            printk(KERN_INFO "%s: Direct control values: %d,%d,%d\n", KBUILD_MODNAME, int_a, int_b, int_c);
+            modify_command(int_a, int_b, int_c);
+            command_status = 1;
+
+            // We need to set all the statuses so we remain in sync
+            if (int_a >= 128) {
+                shoulder_status = 2;
+                int_a -= 128;
+            } else if (int_a >= 64) {
+                shoulder_status = 1;
+                int_a -= 64;
+            } else {
+                shoulder_status = 0;
+            }
+
+            if (int_a >= 32) {
+                elbow_status = 2;
+                int_a -= 32;
+            } else if (int_a >= 16) {
+                elbow_status = 1;
+                int_a -= 16;
+            } else {
+                elbow_status = 0;
+            }
+
+            if (int_a >= 8) {
+                wrist_status = 2;
+                int_a -= 8;
+            } else if (int_a >= 4) {
+                wrist_status = 1;
+                int_a -= 4;
+            } else {
+                wrist_status = 0;
+            }
+
+            if (int_a >= 2) {
+                claw_status = 1;
+            } else if (int_a >= 1) {
+                claw_status = 2;
+            } else {
+                claw_status = 0;
+            }
+
+        } else {
+            printk(KERN_INFO "%s: Invalid direct command format\n", KBUILD_MODNAME);
+            command_status = 2;
         }
 
     } else if (strncmp(input, "shoulder", index) == 0) {
@@ -230,6 +359,7 @@ void process_command(const char *input) {
                 command[0] += 64;
             }
             shoulder_status = 1;
+            command_status = 1;
         } else if(strcmp(param, "down") == 0) {
             printk(KERN_INFO "%s: Turning shoulder down", KBUILD_MODNAME);
             if (shoulder_status == 1) {
@@ -238,6 +368,7 @@ void process_command(const char *input) {
                 command[0] += 128;
             }
             shoulder_status = 2;
+            command_status = 1;
         } else if(strcmp(param, "stop") == 0) {
             printk(KERN_INFO "%s: Stopped shoulder", KBUILD_MODNAME);
             if (shoulder_status == 1) {
@@ -246,8 +377,10 @@ void process_command(const char *input) {
                 command[0] -= 128;
             }
             shoulder_status = 0;
+            command_status = 1;
         } else {
             printk(KERN_INFO "%s: Invalid shoulder command\n", KBUILD_MODNAME);
+            command_status = 2;
         }
 
     } else if (strncmp(input, "elbow", index) == 0) {
@@ -259,6 +392,7 @@ void process_command(const char *input) {
                 command[0] += 16;
             }
             elbow_status = 1;
+            command_status = 1;
         } else if(strcmp(param, "down") == 0) {
             printk(KERN_INFO "%s: Turning elbow down", KBUILD_MODNAME);
             if (elbow_status == 1) {
@@ -267,6 +401,7 @@ void process_command(const char *input) {
                 command[0] += 32;
             }
             elbow_status = 2;
+            command_status = 1;
         } else if(strcmp(param, "stop") == 0) {
             printk(KERN_INFO "%s: Stopped elbow", KBUILD_MODNAME);
             if (elbow_status == 1) {
@@ -275,8 +410,10 @@ void process_command(const char *input) {
                 command[0] -= 32;
             }
             elbow_status = 0;
+            command_status = 1;
         } else {
             printk(KERN_INFO "%s: Invalid elbow command\n", KBUILD_MODNAME);
+            command_status = 2;
         }
 
     } else if (strncmp(input, "wrist", index) == 0) {
@@ -288,6 +425,7 @@ void process_command(const char *input) {
                 command[0] += 4;
             }
             wrist_status = 1;
+            command_status = 1;
         } else if(strcmp(param, "down") == 0) {
             printk(KERN_INFO "%s: Turning wrist down", KBUILD_MODNAME);
             if (wrist_status == 1) {
@@ -296,6 +434,7 @@ void process_command(const char *input) {
                 command[0] += 8;
             }
             wrist_status = 2;
+            command_status = 1;
         } else if(strcmp(param, "stop") == 0) {
             printk(KERN_INFO "%s: Stopped wrist", KBUILD_MODNAME);
             if (wrist_status == 1) {
@@ -304,46 +443,53 @@ void process_command(const char *input) {
                 command[0] -= 8;
             }
             wrist_status = 0;
+            command_status = 1;
         } else {
             printk(KERN_INFO "%s: Invalid wrist command\n", KBUILD_MODNAME);
+            command_status = 2;
         }
 
-    } else if (strncmp(input, "gripper", index) == 0) {
-        if (strcmp(param, "up") == 0) {
-            printk(KERN_INFO "%s: Turning gripper up", KBUILD_MODNAME);
-            if (gripper_status == 2) {
+    } else if (strncmp(input, "claw", index) == 0) {
+        if (strcmp(param, "open") == 0) {
+            printk(KERN_INFO "%s: Opening claw", KBUILD_MODNAME);
+            if (claw_status == 2) {
                 command[0] -= 1;
-            }else if (gripper_status == 0) {
+            }else if (claw_status == 0) {
                 command[0] += 1;
             }
-            gripper_status = 1;
-        } else if(strcmp(param, "down") == 0) {
-            printk(KERN_INFO "%s: Turning gripper down", KBUILD_MODNAME);
-            if (gripper_status == 1) {
+            claw_status = 1;
+            command_status = 1;
+        } else if(strcmp(param, "close") == 0) {
+            printk(KERN_INFO "%s: Closing claw", KBUILD_MODNAME);
+            if (claw_status == 1) {
                 command[0] += 1;
-            }else if (gripper_status == 0) {
+            }else if (claw_status == 0) {
                 command[0] += 2;
             }
-            gripper_status = 2;
+            claw_status = 2;
+            command_status = 1;
         } else if(strcmp(param, "stop") == 0) {
-            printk(KERN_INFO "%s: Stopped gripper", KBUILD_MODNAME);
-            if (gripper_status == 1) {
+            printk(KERN_INFO "%s: Stopped claw", KBUILD_MODNAME);
+            if (claw_status == 1) {
                 command[0] -= 1;
-            } else if (gripper_status == 2) {
+            } else if (claw_status == 2) {
                 command[0] -= 2;
             }
-            gripper_status = 0;
+            claw_status = 0;
+            command_status = 1;
         } else {
-            printk(KERN_INFO "%s: Invalid gripper command\n", KBUILD_MODNAME);
+            printk(KERN_INFO "%s: Invalid claw command\n", KBUILD_MODNAME);
+            command_status = 2;
         }
 
     } else {
         printk(KERN_INFO "%s: Invalid command\n", KBUILD_MODNAME);
+        command_status = 2;
     }
 }
 
 
-static ssize_t device_write(struct file *filep, const char *buffer, size_t len, loff_t *offset) {
+static ssize_t device_write(struct file *file_pointer, const char *buffer, const size_t len, loff_t *offset) {
     if (len > BUF_SIZE - 1) {
         printk(KERN_INFO "%s: Command buffer overflow!", KBUILD_MODNAME);
         return -ENOMEM; // Not enough space
@@ -413,17 +559,21 @@ static int __init A37JN_driver_init(void){
     // Create device class
     char_class = class_create(MODULE_NAME);
     if (IS_ERR(char_class)) {
+
+        // Bail if we cannot make a device class
         unregister_chrdev(major, MODULE_NAME);
-        printk(KERN_ALERT "%s: Failed to register device class\n", KBUILD_MODNAME);
+        printk(KERN_ERR "%s: Failed to register device class\n", KBUILD_MODNAME);
         return (int) PTR_ERR(char_class);
     }
 
     // Create device node
     char_device = device_create(char_class, NULL, MKDEV(major, 0), NULL, MODULE_NAME);
     if (IS_ERR(char_device)) {
+
+        // Bail if we cannot make a device node
         class_destroy(char_class);
         unregister_chrdev(major, MODULE_NAME);
-        printk(KERN_ALERT "%s: Failed to create device\n", KBUILD_MODNAME);
+        printk(KERN_ERR "%s: Failed to create device\n", KBUILD_MODNAME);
         return (int) PTR_ERR(char_device);
     }
 
@@ -432,17 +582,22 @@ static int __init A37JN_driver_init(void){
 
     const int result = usb_register(&usb_driver);
     if (result < 0) {
+
+        // Bail if we cannot register device
+        device_destroy(char_class, MKDEV(major, 0));
+        class_destroy(char_class);
+        unregister_chrdev(major, MODULE_NAME);
+        
         printk(KERN_ERR "%s: Failed to register A37JN Robot arm USB Device with Error: %d\n",KBUILD_MODNAME, result);
         return result;
     }
 
     printk(KERN_INFO "%s: Successfully registered A37JN Robot arm USB Device\n",KBUILD_MODNAME);
 
-
+    // Testing
     printk(KERN_INFO "%s: Led ON\n",KBUILD_MODNAME);
     modify_command(0,0,1); // Array of 3 bytes (example command)
     send_cmd();
-
 
     return 0;
 }
