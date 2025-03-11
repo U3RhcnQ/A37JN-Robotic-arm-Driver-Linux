@@ -11,13 +11,10 @@ MODULE_VERSION("1.0");
 
 #define KBUILD_MODNAME "A37JN Robot arm"
 #define MODULE_NAME "A37JN_Robot_arm"
-#define BUF_SIZE 256
+#define BUF_SIZE 512
 
 // global storage for device Major number
 static int major = 0;
-
-// Counter for times opened
-static int open_count = 0;
 
 // Need these as they all use the same value to control
 static int shoulder_status = 0;
@@ -34,8 +31,9 @@ static char command_buffer[BUF_SIZE];
 // Structure to hold the active USB device reference
 static struct usb_device *active_usb_device = NULL;
 
-// Table of USB id's
+// Table of USB id's (There can be 2 versions so we account for that)
 static struct usb_device_id usb_ids[] = {
+    {USB_DEVICE(0x1267,0x000)},
     {USB_DEVICE(0x1267,0x001)},
     {}
 };
@@ -74,7 +72,7 @@ static struct usb_driver usb_driver = {
     .disconnect = usb_disconnect
 };
 
-void modify_command(int a, int b, int c) {
+void modify_command(const int a, const int b, const int c) {
     command[0] = a;
     command[1] = b;
     command[2] = c;
@@ -126,8 +124,7 @@ static int send_cmd(void) {
 
 
 static int device_open(struct inode *inodep, struct file *filep) {
-    open_count++;
-    printk(KERN_INFO "%s: Device opened %d times\n", KBUILD_MODNAME, open_count);
+    printk(KERN_INFO "%s: Device opened\n", KBUILD_MODNAME);
     return 0;
 }
 
@@ -383,6 +380,10 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t len, 
 
     // Send processed command to robot arm
     send_cmd();
+
+    // Clear the buffer so it does not hold stale data
+    memset(command_buffer, 0, BUF_SIZE);
+
     return len;
 }
 
