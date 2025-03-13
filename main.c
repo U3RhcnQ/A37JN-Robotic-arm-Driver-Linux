@@ -1,7 +1,10 @@
-#include <linux/module.h>     /* Needed by all modules */
-#include <linux/kernel.h>     /* Needed for KERN_INFO */
-#include <linux/init.h>       /* Needed for the macros */
-#include <linux/usb.h>
+#include <linux/module.h>
+#include <linux/kernel.h> // Needed for KERN_INFO
+#include <linux/init.h>  // Needed for the macros
+#include <linux/usb.h>  // Needed for usb
+#include <linux/proc_fs.h> // Proc file stuff
+#include <linux/seq_file.h>
+
 
 // The license type
 MODULE_LICENSE("GPL");
@@ -12,6 +15,11 @@ MODULE_VERSION("1.0");
 #define KBUILD_MODNAME "A37JN Robot arm"
 #define MODULE_NAME "A37JN_Robot_arm"
 #define BUF_SIZE 512
+
+#define MAGIC_NUM 0x80
+#define IOCTL_SET_VALUE _IOW(MAGIC_NUM, 1, int)
+#define IOCTL_GET_VALUE _IOR(MAGIC_NUM, 2, int)
+
 
 // global storage for device Major number
 static int major = 0;
@@ -25,6 +33,10 @@ static int claw_status = 0;
 static int connection_status = 0;
 static int command_status = 0;
 static int battery_level = 0;
+
+// Text for nice print
+const char *connection_status_text;
+const char *command_status_text;
 
 // Command for arm
 static int command[3] = {0, 0, 0};
@@ -142,14 +154,7 @@ static int device_close(struct inode *inode_pointer, struct file *file_pointer) 
     return 0;
 }
 
-static ssize_t device_read(struct file *file_pointer, char __user *buffer, size_t len, loff_t *offset) {
-
-    char status_message[64];
-    int msg_length;
-
-    const char *connection_status_text;
-    const char *command_status_text;
-
+static void update_status_text(void) {
     if (connection_status == 1) {
         connection_status_text = "yes";
     } else {
@@ -166,7 +171,16 @@ static ssize_t device_read(struct file *file_pointer, char __user *buffer, size_
     } else {
         command_status_text = "none";
     }
-    
+}
+
+static ssize_t device_read(struct file *file_pointer, char __user *buffer, size_t len, loff_t *offset) {
+
+    char status_message[64];
+    int msg_length;
+
+    // Update status text
+    update_status_text();
+
     // Format the message
     msg_length = snprintf(status_message, sizeof(status_message), "connected:%s status:%s battery:%d\n", connection_status_text, command_status_text, battery_level);
 
@@ -263,93 +277,7 @@ static void process_command(const char *input) {
             printk(KERN_INFO "%s: Invalid stop command\n", KBUILD_MODNAME);
             command_status = 2;
         }
-
-    } else if (strncmp(input, "direct", index) == 0) {
-
-        //mostly temp variables
-        char a[4], b[4], c[4];
-        int int_a, int_b, int_c;
-
-        // need this as kstrtol expects a long
-        long temp;
-
-        // Parse three integers separated by commas
-        // will try to match up to 3 character before the ","
-        if (sscanf(param, "%3[^,],%3[^,],%3s", a, b, c) == 3) {
-
-            // Convert and validate numbers
-            if (kstrtol(a, 0, &temp) == 0) {
-                int_a = (int) temp;
-            } else {
-                printk(KERN_INFO "%s: Invalid number: %s\n", KBUILD_MODNAME, a);
-                command_status = 2;
-                return;
-            }
-
-            if (kstrtol(b, 0, &temp) == 0) {
-                int_b = (int) temp;
-            } else {
-                printk(KERN_INFO "%s: Invalid number: %s\n", KBUILD_MODNAME, b);
-                command_status = 2;
-                return;
-            }
-
-            if (kstrtol(c, 0, &temp) == 0) {
-                int_c = (int) temp;
-            } else {
-                printk(KERN_INFO "%s: Invalid number: %s\n", KBUILD_MODNAME, c);
-                command_status = 2;
-                return;
-            }
-
-            printk(KERN_INFO "%s: Direct control values: %d,%d,%d\n", KBUILD_MODNAME, int_a, int_b, int_c);
-            modify_command(int_a, int_b, int_c);
-            command_status = 1;
-
-            // We need to set all the statuses so we remain in sync
-            if (int_a >= 128) {
-                shoulder_status = 2;
-                int_a -= 128;
-            } else if (int_a >= 64) {
-                shoulder_status = 1;
-                int_a -= 64;
-            } else {
-                shoulder_status = 0;
-            }
-
-            if (int_a >= 32) {
-                elbow_status = 2;
-                int_a -= 32;
-            } else if (int_a >= 16) {
-                elbow_status = 1;
-                int_a -= 16;
-            } else {
-                elbow_status = 0;
-            }
-
-            if (int_a >= 8) {
-                wrist_status = 2;
-                int_a -= 8;
-            } else if (int_a >= 4) {
-                wrist_status = 1;
-                int_a -= 4;
-            } else {
-                wrist_status = 0;
-            }
-
-            if (int_a >= 2) {
-                claw_status = 1;
-            } else if (int_a >= 1) {
-                claw_status = 2;
-            } else {
-                claw_status = 0;
-            }
-
-        } else {
-            printk(KERN_INFO "%s: Invalid direct command format\n", KBUILD_MODNAME);
-            command_status = 2;
-        }
-
+        
     } else if (strncmp(input, "shoulder", index) == 0) {
         if (strcmp(param, "up") == 0) {
             printk(KERN_INFO "%s: Turning shoulder up", KBUILD_MODNAME);
@@ -450,8 +378,8 @@ static void process_command(const char *input) {
         }
 
     } else if (strncmp(input, "claw", index) == 0) {
-        if (strcmp(param, "open") == 0) {
-            printk(KERN_INFO "%s: Opening claw", KBUILD_MODNAME);
+        if (strcmp(param, "close") == 0) {
+            printk(KERN_INFO "%s: Closing claw", KBUILD_MODNAME);
             if (claw_status == 2) {
                 command[0] -= 1;
             }else if (claw_status == 0) {
@@ -459,8 +387,8 @@ static void process_command(const char *input) {
             }
             claw_status = 1;
             command_status = 1;
-        } else if(strcmp(param, "close") == 0) {
-            printk(KERN_INFO "%s: Closing claw", KBUILD_MODNAME);
+        } else if(strcmp(param, "open") == 0) {
+            printk(KERN_INFO "%s: Opening claw", KBUILD_MODNAME);
             if (claw_status == 1) {
                 command[0] += 1;
             }else if (claw_status == 0) {
@@ -533,11 +461,117 @@ static ssize_t device_write(struct file *file_pointer, const char *buffer, const
     return len;
 }
 
+static long device_ioctl(struct file *file, const unsigned int cmd, const unsigned long arg) {
+
+    // Only way to pass multiple ints via ioctl so we have to use a struct
+    struct device_command {
+        int var1;
+        int var2;
+        int var3;
+    };
+
+    struct device_command command;
+
+    switch (cmd) {
+        case IOCTL_SET_VALUE:
+            
+        if (copy_from_user(&command, (struct device_command __user *)arg, sizeof(struct device_command))) {
+            return -EFAULT;
+        }
+
+        // A bit messy but it works :/
+        if (command.var1 < 0 || command.var2 < 0 || command.var3 < 0 ||
+            command.var1 % 2 !=0 || command.var2 % 2 !=0 || command.var3 % 2 !=0 ||
+            command.var1 <= 170 || command.var2 <= 2 || command.var3 <= 2) {
+            return -EINVAL; // Reject invalid values
+        }
+
+        printk(KERN_INFO "%s: Direct control values: %d,%d,%d\n", KBUILD_MODNAME, command.var1, command.var2, command.var3);
+
+        // Execute the command
+        modify_command(command.var1, command.var2, command.var3);
+        command_status = 1;
+
+        // We need to set all the statuses so we remain in sync
+        if (command.var1 >= 128) {
+            shoulder_status = 2;
+            command.var1 -= 128;
+        } else if (command.var1 >= 64) {
+            shoulder_status = 1;
+            command.var1 -= 64;
+        } else {
+            shoulder_status = 0;
+        }
+
+        if (command.var1 >= 32) {
+            elbow_status = 2;
+            command.var1 -= 32;
+        } else if (command.var1 >= 16) {
+            elbow_status = 1;
+            command.var1 -= 16;
+        } else {
+            elbow_status = 0;
+        }
+
+        if (command.var1 >= 8) {
+            wrist_status = 2;
+            command.var1 -= 8;
+        } else if (command.var1 >= 4) {
+            wrist_status = 1;
+            command.var1 -= 4;
+        } else {
+            wrist_status = 0;
+        }
+
+        if (command.var1 >= 2) {
+            claw_status = 1;
+        } else if (command.var1 >= 1) {
+            claw_status = 2;
+        } else {
+            claw_status = 0;
+        }
+
+        break;
+
+    default:
+        return -EINVAL;  // Invalid command
+        
+    }
+
+    return 0;
+}
+
 struct file_operations fops = {
+    .unlocked_ioctl = device_ioctl,
     .read = device_read,
     .write = device_write,
     .open = device_open,
     .release = device_close
+};
+
+static int proc_show(struct seq_file *m, void *v) {
+
+    // Update status text
+    update_status_text();
+
+    seq_printf(m, "Shoulder Status: %d\n", shoulder_status);
+    seq_printf(m, "Elbow Status: %d\n", elbow_status);
+    seq_printf(m, "Wrist Status: %d\n", wrist_status);
+    seq_printf(m, "Claw Status: %d\n", claw_status);
+    seq_printf(m, "connected:%s status:%s battery:%d\n", connection_status_text, command_status_text, battery_level);
+
+    return 0;
+}
+
+static int proc_open(struct inode *inode, struct file *file) {
+    return single_open(file, proc_show, NULL);
+}
+
+static const struct proc_ops proc_fops = {
+    .proc_open    = proc_open,
+    .proc_read    = seq_read,
+    .proc_lseek   = seq_lseek,
+    .proc_release = single_release,
 };
 
 
@@ -591,6 +625,23 @@ static int __init A37JN_driver_init(void){
         printk(KERN_ERR "%s: Failed to register A37JN Robot arm USB Device with Error: %d\n",KBUILD_MODNAME, result);
         return result;
     }
+
+    struct proc_dir_entry *proc_entry;
+
+    proc_entry = proc_create(KBUILD_MODNAME, 0444, NULL, &proc_fops);
+    if (!proc_entry) {
+        printk(KERN_ERR "%s: Failed to create Proc file\n", KBUILD_MODNAME);
+
+        // Bail if we cannot register proc file
+        usb_deregister(&usb_driver);
+        device_destroy(char_class, MKDEV(major, 0));
+        class_destroy(char_class);
+        unregister_chrdev(major, MODULE_NAME);
+
+        return -ENOMEM;
+    }
+    printk(KERN_INFO "%s: Proc file Created successfully \n", KBUILD_MODNAME);
+
 
     printk(KERN_INFO "%s: Successfully registered A37JN Robot arm USB Device\n",KBUILD_MODNAME);
 
