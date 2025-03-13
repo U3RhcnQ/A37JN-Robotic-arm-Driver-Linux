@@ -628,7 +628,7 @@ static int __init A37JN_driver_init(void){
 
     struct proc_dir_entry *proc_entry;
 
-    proc_entry = proc_create(KBUILD_MODNAME, 0444, NULL, &proc_fops);
+    proc_entry = proc_create(MODULE_NAME, 0444, NULL, &proc_fops);
     if (!proc_entry) {
         printk(KERN_ERR "%s: Failed to create Proc file\n", KBUILD_MODNAME);
 
@@ -658,6 +658,7 @@ static void __exit A37JN_driver_exit(void){
     // we need to check if stuff has been initialised before destroying
     if (major > 0) {
         device_destroy(char_class, MKDEV(major, 0));
+        remove_proc_entry(MODULE_NAME, NULL);
         class_unregister(char_class);
         class_destroy(char_class);
         unregister_chrdev(major, MODULE_NAME);
