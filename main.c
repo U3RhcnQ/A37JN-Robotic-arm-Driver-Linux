@@ -17,9 +17,8 @@ MODULE_VERSION("1.0");
 #define BUF_SIZE 512
 
 #define MAGIC_NUM 0x80
-#define IOCTL_SET_VALUE _IOW(MAGIC_NUM, 1, int)
-#define IOCTL_GET_VALUE _IOR(MAGIC_NUM, 2, int)
-
+#define IOCTL_SET_VALUE _IOW(MAGIC_NUM, 1, struct device_command)
+#define IOCTL_GET_VALUE _IOR(MAGIC_NUM, 2, struct device_command)
 
 // global storage for device Major number
 static int major = 0;
@@ -58,6 +57,13 @@ static struct usb_device_id usb_ids[] = {
 static struct class *char_class;
 static struct device *char_device;
 
+// Only way to pass multiple ints via ioctl so we have to use a struct
+struct device_command {
+    int var1;
+    int var2;
+    int var3;
+};
+
 // Helper to quicly modify the whole command
 static void modify_command(const int a, const int b, const int c) {
     command[0] = a;
@@ -65,6 +71,7 @@ static void modify_command(const int a, const int b, const int c) {
     command[2] = c;
 }
 
+// This function detects the connected usb and adds it to active_usb_device
 static int usb_probe(struct usb_interface *interface, const struct usb_device_id *id) {
     printk(KERN_INFO "%s: USB device found: Vendor: 0x%04x, Product ID: 0x%04x\n", KBUILD_MODNAME, id->idVendor, id->idProduct);
     active_usb_device = interface_to_usbdev(interface);
@@ -72,6 +79,7 @@ static int usb_probe(struct usb_interface *interface, const struct usb_device_id
     return 0;
 }
 
+// Handles usb disconnections
 static void usb_disconnect(struct usb_interface *interface) {
     printk(KERN_INFO "%s: USB device removed\n", KBUILD_MODNAME);
     active_usb_device = NULL;
@@ -79,7 +87,6 @@ static void usb_disconnect(struct usb_interface *interface) {
 
     // Since device has been disconnected we can reset all values
     modify_command(0, 0, 0);
-
     shoulder_status = 0;
     elbow_status = 0;
     wrist_status = 0;
@@ -114,7 +121,6 @@ static int send_cmd(void) {
         parsed_command[i] = (unsigned char)command[i];
     }
 
-    //printk("Size: %lu\n", sizeof(parsed_command));
     int ret;
 
     const __u8 bmRequestType = 0x40;
@@ -144,17 +150,21 @@ static int send_cmd(void) {
     return ret;
 }
 
+// Detects device open event
 static int device_open(struct inode *inode_pointer, struct file *file_pointer) {
     printk(KERN_INFO "%s: Device opened\n", KBUILD_MODNAME);
     return 0;
 }
 
+// Detects device close event
 static int device_close(struct inode *inode_pointer, struct file *file_pointer) {
     printk(KERN_INFO "%s: Device closed\n", KBUILD_MODNAME);
     return 0;
 }
 
+// Helper function for text updating
 static void update_status_text(void) {
+
     if (connection_status == 1) {
         connection_status_text = "yes";
     } else {
@@ -171,8 +181,10 @@ static void update_status_text(void) {
     } else {
         command_status_text = "none";
     }
+
 }
 
+// Handles userspace reading from character device
 static ssize_t device_read(struct file *file_pointer, char __user *buffer, size_t len, loff_t *offset) {
 
     char status_message[64];
@@ -198,12 +210,14 @@ static ssize_t device_read(struct file *file_pointer, char __user *buffer, size_
     return msg_length;
 }
 
+// Lots of logic for building the command for the USB and parsing user input
 static void process_command(const char *input) {
 
     const char *param = strchr(input, ':'); // Find the ':'
 
-    // If ":" exists
+    // CHeck if ":" exists
     if (!param) {
+        // Bail now as command is obviously incorrect
         printk(KERN_INFO "%s: Invalid input\n", KBUILD_MODNAME);
         command_status = 2;
         return;
@@ -213,6 +227,7 @@ static void process_command(const char *input) {
     param++; // move one character forward past:
 
     if (strlen(param) < 2) {
+        // Bail now as command is obviously incorrect
         printk(KERN_INFO "%s: Invalid input\n", KBUILD_MODNAME);
         command_status = 2;
         return;
@@ -250,24 +265,24 @@ static void process_command(const char *input) {
             command_status = 2;
         }
 
+    // Special case for stop (move stops only movement and all stops all including LED)
     } else if (strncmp(input, "stop", index) == 0) {
         if (strcmp(param, "move") == 0) {
+
             printk(KERN_INFO "%s: Stopping movement", KBUILD_MODNAME);
             command[0] = 0;
             command[1] = 0;
             command_status = 1;
-
             shoulder_status = 0;
             elbow_status = 0;
             wrist_status = 0;
             claw_status = 0;
 
         } else if(strcmp(param, "all") == 0) {
-            printk(KERN_INFO "%s: Stopping all", KBUILD_MODNAME);
 
+            printk(KERN_INFO "%s: Stopping all", KBUILD_MODNAME);
             modify_command(0,0,0);
             command_status = 1;
-
             shoulder_status = 0;
             elbow_status = 0;
             wrist_status = 0;
@@ -416,8 +431,10 @@ static void process_command(const char *input) {
     }
 }
 
-
+// Probably the most important part processing userspace input
 static ssize_t device_write(struct file *file_pointer, const char *buffer, const size_t len, loff_t *offset) {
+
+    // Sanity check if the buffer is not overflowed
     if (len > BUF_SIZE - 1) {
         printk(KERN_INFO "%s: Command buffer overflow!", KBUILD_MODNAME);
         return -ENOMEM; // Not enough space
@@ -453,27 +470,20 @@ static ssize_t device_write(struct file *file_pointer, const char *buffer, const
     }
 
     // Send processed command to robot arm
+    // We only do this once at the end in order to allow us to combine all received commands
     send_cmd();
 
-    // Clear the buffer so it does not hold stale data
+    // Clear the buffer so it does not hold any leftover data
     memset(command_buffer, 0, BUF_SIZE);
 
-    return len;
+    return 0;
 }
 
 static long device_ioctl(struct file *file, const unsigned int cmd, const unsigned long arg) {
 
-    // Only way to pass multiple ints via ioctl so we have to use a struct
-    struct device_command {
-        int var1;
-        int var2;
-        int var3;
-    };
-
     struct device_command command;
 
-    switch (cmd) {
-        case IOCTL_SET_VALUE:
+    if (cmd == IOCTL_SET_VALUE) {
             
         if (copy_from_user(&command, (struct device_command __user *)arg, sizeof(struct device_command))) {
             return -EFAULT;
@@ -481,8 +491,8 @@ static long device_ioctl(struct file *file, const unsigned int cmd, const unsign
 
         // A bit messy but it works :/
         if (command.var1 < 0 || command.var2 < 0 || command.var3 < 0 ||
-            command.var1 % 2 !=0 || command.var2 % 2 !=0 || command.var3 % 2 !=0 ||
-            command.var1 <= 170 || command.var2 <= 2 || command.var3 <= 2) {
+            command.var1 % 2 !=0 ||
+            command.var1 > 170 || command.var2 > 2 || command.var3 > 2) {
             return -EINVAL; // Reject invalid values
         }
 
@@ -531,12 +541,12 @@ static long device_ioctl(struct file *file, const unsigned int cmd, const unsign
             claw_status = 0;
         }
 
-        break;
-
-    default:
+    } else {
         return -EINVAL;  // Invalid command
-        
     }
+
+    // Send command to robot arm
+    send_cmd();
 
     return 0;
 }
@@ -574,6 +584,12 @@ static const struct proc_ops proc_fops = {
     .proc_release = single_release,
 };
 
+// Required for setting the permissions to 666
+static char *char_devnode(const struct device *dev, umode_t *mode) {
+    if (mode)
+        *mode = 0666;
+    return NULL;
+}
 
 // Initialisation logic
 static int __init A37JN_driver_init(void){
@@ -599,6 +615,9 @@ static int __init A37JN_driver_init(void){
         printk(KERN_ERR "%s: Failed to register device class\n", KBUILD_MODNAME);
         return (int) PTR_ERR(char_class);
     }
+
+    // Assign a custom function (char_devnode) to the devnode field of a struct class for permissions
+    char_class->devnode = char_devnode;
 
     // Create device node
     char_device = device_create(char_class, NULL, MKDEV(major, 0), NULL, MODULE_NAME);
