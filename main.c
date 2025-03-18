@@ -477,7 +477,7 @@ static ssize_t device_write(struct file *file_pointer, const char *buffer, const
     // Clear the buffer so it does not hold any leftover data
     memset(command_buffer, 0, BUF_SIZE);
 
-    return 0;
+    return len;
 }
 
 static long device_ioctl(struct file *file, const unsigned int cmd, const unsigned long arg) {
