@@ -123,6 +123,7 @@ static int send_cmd(void) {
 
     int ret;
 
+    // Makes sure we use linux kernel definition of u8, u16 (Good practice)
     const __u8 bmRequestType = 0x40;
     const __u8 bRequest = 6;
     const __u16 wValue = 0x100;
@@ -482,25 +483,27 @@ static ssize_t device_write(struct file *file_pointer, const char *buffer, const
 static long device_ioctl(struct file *file, const unsigned int cmd, const unsigned long arg) {
 
     struct device_command command;
+    static int temp_command[3] = {0,0,0};
 
     if (cmd == IOCTL_SET_VALUE) {
             
         if (copy_from_user(&command, (struct device_command __user *)arg, sizeof(struct device_command))) {
+            command_status = 2;
             return -EFAULT;
         }
 
         // A bit messy but it works :/
         if (command.var1 < 0 || command.var2 < 0 || command.var3 < 0 ||
-            command.var1 % 2 !=0 ||
-            command.var1 > 170 || command.var2 > 2 || command.var3 > 2) {
+            command.var1 > 170 || command.var2 > 2 || command.var3 > 1) {
+            command_status = 2;
             return -EINVAL; // Reject invalid values
         }
 
         printk(KERN_INFO "%s: Direct control values: %d,%d,%d\n", KBUILD_MODNAME, command.var1, command.var2, command.var3);
 
-        // Execute the command
-        modify_command(command.var1, command.var2, command.var3);
-        command_status = 1;
+        temp_command[0] = command.var1;
+        temp_command[1] = command.var2;
+        temp_command[2] = command.var3;
 
         // We need to set all the statuses so we remain in sync
         if (command.var1 >= 128) {
@@ -544,6 +547,11 @@ static long device_ioctl(struct file *file, const unsigned int cmd, const unsign
     } else {
         return -EINVAL;  // Invalid command
     }
+
+
+    // Execute the command
+    modify_command(temp_command[0], temp_command[1], temp_command[2]);
+    command_status = 1;
 
     // Send command to robot arm
     send_cmd();
